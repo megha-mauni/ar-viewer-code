@@ -132,14 +132,11 @@
             Drop 3D Model (.glb/.gltf) Here
         </div>
         <div id="ui">
-            <h3>AR 3D Model Viewer</h3>
-            
+            <h3>VR 3D Model Viewer</h3>
             <div class="warning">
-                <strong>Note:</strong> AR requires HTTPS and a compatible device with WebXR support (Android Chrome/Edge with ARCore).
+                <strong>Note:</strong> VR requires HTTPS and a compatible device with WebXR support (e.g., Oculus Browser, Chrome with WebXR, or desktop with WebXR emulator).
             </div>
-            
             <div id="status">Loading...</div>
-            
             <div class="model-selector">
                 <label for="modelSelect">Select Model:</label>
                 <select id="modelSelect">
@@ -148,16 +145,13 @@
                     <option value="torus">Spinning Torus</option>
                 </select>
             </div>
-            
-            <button id="arButton" class="button" disabled>Start AR</button>
+            <button id="vrButton" class="button" disabled>Enter VR</button>
             <button id="resetButton" class="button">Reset View</button>
-            
             <div class="controls">
                 <div class="control-group">
                     <label for="scaleSlider">Model Scale:</label>
                     <input type="range" id="scaleSlider" min="0.1" max="3" step="0.1" value="1">
                 </div>
-                
                 <div class="control-group">
                     <label for="rotationSpeed">Rotation Speed:</label>
                     <input type="range" id="rotationSpeed" min="0" max="0.1" step="0.01" value="0.02">
@@ -179,7 +173,7 @@
             });
         }
         
-        class AR3DViewer {
+        class VR3DViewer {
             constructor() {
                 this.scene = null;
                 this.camera = null;
@@ -187,231 +181,161 @@
                 this.model = null;
                 this.models = {};
                 this.rotationSpeed = 0.02;
-                this.isARActive = false;
-                this.reticle = null;
-                this.hitTestSource = null;
-                this.hitTestSourceRequested = false;
-                this.placed = false;
-                
+                this.isVRActive = false;
                 this.init();
                 this.setupEventListeners();
-                this.checkARSupport();
+                this.checkVRSupport();
                 this.setupDragAndDrop();
             }
-            
             init() {
-                // Create scene
                 this.scene = new THREE.Scene();
-                
-                // Create camera
                 this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
                 this.camera.position.set(0, 1.6, 3);
-                
-                // Create renderer
-                this.renderer = new THREE.WebGLRenderer({ 
-                    antialias: true, 
-                    alpha: true,
-                    preserveDrawingBuffer: true
-                });
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
                 this.renderer.setPixelRatio(window.devicePixelRatio);
                 this.renderer.xr.enabled = true;
                 this.renderer.shadowMap.enabled = true;
                 this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-                
                 document.getElementById('container').appendChild(this.renderer.domElement);
-                
-                // Add lighting
                 this.setupLighting();
-                
-                // Create models
                 this.createModels();
-                
-                // Set initial model
                 this.setModel('cube');
-                
-                // Add reticle for AR placement
-                this.createReticle();
-                
-                // Start render loop
                 this.renderer.setAnimationLoop(this.render.bind(this));
-                
-                this.updateStatus('Ready! Select a model and try AR.');
+                this.updateStatus('Ready! Select a model and try VR.');
             }
-            
             setupLighting() {
-                // Ambient light
                 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
                 this.scene.add(ambientLight);
-                
-                // Directional light
                 const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
                 directionalLight.position.set(5, 10, 5);
                 directionalLight.castShadow = true;
                 directionalLight.shadow.mapSize.width = 2048;
                 directionalLight.shadow.mapSize.height = 2048;
                 this.scene.add(directionalLight);
-                
-                // Point light for AR
                 const pointLight = new THREE.PointLight(0xffffff, 0.5);
                 pointLight.position.set(0, 2, 0);
                 this.scene.add(pointLight);
             }
-            
             createModels() {
-                // Animated Cube
                 const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
-                const cubeMaterial = new THREE.MeshPhongMaterial({ 
-                    color: 0x00ff88,
-                    transparent: true,
-                    opacity: 0.9
-                });
+                const cubeMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff88, transparent: true, opacity: 0.9 });
                 this.models.cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
                 this.models.cube.castShadow = true;
                 this.models.cube.receiveShadow = true;
-                
-                // Textured Sphere
                 const sphereGeometry = new THREE.SphereGeometry(0.8, 32, 32);
                 const canvas = document.createElement('canvas');
                 canvas.width = 256;
                 canvas.height = 256;
                 const ctx = canvas.getContext('2d');
-                
-                // Create a simple pattern texture
                 const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
                 gradient.addColorStop(0, '#ff6b6b');
                 gradient.addColorStop(0.5, '#4ecdc4');
                 gradient.addColorStop(1, '#45b7d1');
                 ctx.fillStyle = gradient;
                 ctx.fillRect(0, 0, 256, 256);
-                
                 const texture = new THREE.CanvasTexture(canvas);
                 const sphereMaterial = new THREE.MeshPhongMaterial({ map: texture });
                 this.models.sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
                 this.models.sphere.castShadow = true;
-                
-                // Spinning Torus
                 const torusGeometry = new THREE.TorusGeometry(0.7, 0.3, 16, 100);
-                const torusMaterial = new THREE.MeshPhongMaterial({ 
-                    color: 0xff6347,
-                    shininess: 100
-                });
+                const torusMaterial = new THREE.MeshPhongMaterial({ color: 0xff6347, shininess: 100 });
                 this.models.torus = new THREE.Mesh(torusGeometry, torusMaterial);
                 this.models.torus.castShadow = true;
             }
-            
-            createReticle() {
-                const geometry = new THREE.RingGeometry(0.12, 0.15, 32).rotateX(-Math.PI / 2);
-                const material = new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide });
-                this.reticle = new THREE.Mesh(geometry, material);
-                this.reticle.matrixAutoUpdate = false;
-                this.reticle.visible = false;
-                this.scene.add(this.reticle);
+            setModel(modelName) {
+                if (this.model) {
+                    this.scene.remove(this.model);
+                }
+                this.model = this.models[modelName];
+                if (this.model) {
+                    this.model.position.set(0, 0, -2);
+                    this.model.visible = true;
+                    this.scene.add(this.model);
+                }
             }
-            
-            async checkARSupport() {
+            async checkVRSupport() {
                 if ('xr' in navigator) {
                     try {
-                        const supported = await navigator.xr.isSessionSupported('immersive-ar');
+                        const supported = await navigator.xr.isSessionSupported('immersive-vr');
                         if (supported) {
-                            document.getElementById('arButton').disabled = false;
-                            this.updateStatus('AR supported! Ready to start.');
+                            document.getElementById('vrButton').disabled = false;
+                            this.updateStatus('VR supported! Ready to start.');
                         } else {
-                            this.updateStatus('AR not supported on this device.');
+                            this.updateStatus('VR not supported on this device.');
                         }
                     } catch (error) {
-                        this.updateStatus('Error checking AR support: ' + error.message);
+                        this.updateStatus('Error checking VR support: ' + error.message);
                     }
                 } else {
                     this.updateStatus('WebXR not available in this browser.');
                 }
             }
-            
-            async startAR() {
+            async startVR() {
                 if (!navigator.xr) {
                     this.updateStatus('WebXR not supported');
                     return;
                 }
-                this.placed = false;
                 try {
-                    const session = await navigator.xr.requestSession('immersive-ar', {
-                        requiredFeatures: ['hit-test', 'local-floor'],
-                        optionalFeatures: ['dom-overlay'],
-                        domOverlay: { root: document.getElementById('ui') }
+                    const session = await navigator.xr.requestSession('immersive-vr', {
+                        optionalFeatures: ['local-floor', 'bounded-floor']
                     });
                     this.renderer.xr.setSession(session);
-                    this.isARActive = true;
-                    document.getElementById('arButton').textContent = 'Exit AR';
-                    this.updateStatus('AR active! Move your device to find a surface, then tap to place the model.');
-                    this.hitTestSourceRequested = false;
-                    this.reticle.visible = false;
+                    this.isVRActive = true;
+                    document.getElementById('vrButton').textContent = 'Exit VR';
+                    this.updateStatus('VR active!');
                     session.addEventListener('end', () => {
-                        this.isARActive = false;
-                        document.getElementById('arButton').textContent = 'Start AR';
-                        this.updateStatus('AR session ended.');
-                        this.hitTestSourceRequested = false;
-                        this.hitTestSource = null;
-                        this.reticle.visible = false;
+                        this.isVRActive = false;
+                        document.getElementById('vrButton').textContent = 'Enter VR';
+                        this.updateStatus('VR session ended.');
                     });
                 } catch (error) {
-                    this.updateStatus('AR Error: ' + error.message);
+                    this.updateStatus('VR Error: ' + error.message);
                 }
             }
-            
-            exitAR() {
+            exitVR() {
                 if (this.renderer.xr.getSession()) {
                     this.renderer.xr.getSession().end();
                 }
             }
-            
             resetView() {
                 if (this.model) {
                     this.model.position.set(0, 0, -2);
                     this.model.rotation.set(0, 0, 0);
                     this.model.scale.set(1, 1, 1);
-                    this.model.visible = !this.isARActive;
                 }
                 this.camera.position.set(0, 1.6, 3);
                 this.camera.lookAt(0, 0, 0);
-                this.placed = false;
                 this.updateStatus('View reset.');
             }
-            
             setupEventListeners() {
-                // AR button
-                document.getElementById('arButton').addEventListener('click', () => {
-                    if (this.isARActive) {
-                        this.exitAR();
+                document.getElementById('vrButton').addEventListener('click', () => {
+                    if (this.isVRActive) {
+                        this.exitVR();
                     } else {
-                        this.startAR();
+                        this.startVR();
                     }
                 });
-                // Reset button
                 document.getElementById('resetButton').addEventListener('click', () => {
                     this.resetView();
                 });
-                // Model selector
                 document.getElementById('modelSelect').addEventListener('change', (e) => {
                     this.setModel(e.target.value);
                 });
-                // Scale slider
                 document.getElementById('scaleSlider').addEventListener('input', (e) => {
                     if (this.model) {
                         const scale = parseFloat(e.target.value);
                         this.model.scale.set(scale, scale, scale);
                     }
                 });
-                // Rotation speed slider
                 document.getElementById('rotationSpeed').addEventListener('input', (e) => {
                     this.rotationSpeed = parseFloat(e.target.value);
                 });
-                // Window resize
                 window.addEventListener('resize', () => {
                     this.camera.aspect = window.innerWidth / window.innerHeight;
                     this.camera.updateProjectionMatrix();
                     this.renderer.setSize(window.innerWidth, window.innerHeight);
                 });
-                // Touch controls for mobile (for non-AR mode)
                 let isPointerDown = false;
                 let pointerX = 0;
                 let pointerY = 0;
@@ -421,7 +345,7 @@
                     pointerY = e.clientY;
                 });
                 this.renderer.domElement.addEventListener('pointermove', (e) => {
-                    if (!isPointerDown || this.isARActive) return;
+                    if (!isPointerDown || this.isVRActive) return;
                     const deltaX = (e.clientX - pointerX) * 0.01;
                     const deltaY = (e.clientY - pointerY) * 0.01;
                     if (this.model) {
@@ -434,36 +358,21 @@
                 this.renderer.domElement.addEventListener('pointerup', () => {
                     isPointerDown = false;
                 });
-                // AR tap to place
-                this.renderer.domElement.addEventListener('click', (e) => {
-                    if (this.isARActive && this.reticle.visible && !this.placed) {
-                        this.placeModelAtReticle();
+            }
+            render() {
+                if (this.model && this.rotationSpeed > 0) {
+                    this.model.rotation.y += this.rotationSpeed;
+                    if (this.model === this.models.cube) {
+                        this.model.rotation.x += this.rotationSpeed * 0.7;
+                    } else if (this.model === this.models.torus) {
+                        this.model.rotation.x += this.rotationSpeed * 1.2;
                     }
-                });
-            }
-            
-            placeModelAtReticle() {
-                if (this.model && this.reticle && this.reticle.visible) {
-                    this.model.position.setFromMatrixPosition(this.reticle.matrix);
-                    this.model.visible = true;
-                    this.placed = true;
-                    this.updateStatus('Model placed!');
                 }
+                this.renderer.render(this.scene, this.camera);
             }
-            
-            setModel(modelName) {
-                if (this.model) {
-                    this.scene.remove(this.model);
-                }
-                this.model = this.models[modelName];
-                if (this.model) {
-                    this.model.position.set(0, 0, -2);
-                    this.model.visible = !this.isARActive; // Hide in AR until placed
-                    this.scene.add(this.model);
-                }
-                this.placed = false;
+            updateStatus(message) {
+                document.getElementById('status').textContent = message;
             }
-            
             async loadDroppedModel(file) {
                 const ext = file.name.split('.').pop().toLowerCase();
                 if (ext === 'glb' || ext === 'gltf') {
@@ -477,9 +386,9 @@
                         loader.parse(arrayBuffer, '', (gltf) => {
                             if (this.model) this.scene.remove(this.model);
                             this.model = gltf.scene;
-                            this.model.visible = !this.isARActive; // Hide in AR until placed
+                            this.model.position.set(0, 0, -2);
+                            this.model.scale.set(1, 1, 1);
                             this.scene.add(this.model);
-                            this.placed = false;
                             this.updateStatus('Custom model loaded!');
                         }, (error) => {
                             this.updateStatus('Failed to load model: ' + error.message);
@@ -490,25 +399,21 @@
                     this.updateStatus('Unsupported file type. Only .glb/.gltf supported.');
                 }
             }
-            
             setupDragAndDrop() {
                 const overlay = document.getElementById('dragOverlay');
                 const container = document.getElementById('container');
-                // Highlight overlay on drag
                 ['dragenter', 'dragover'].forEach(event => {
                     container.addEventListener(event, (e) => {
                         e.preventDefault();
                         overlay.style.display = 'flex';
                     });
                 });
-                // Hide overlay on drag leave
                 ['dragleave', 'drop'].forEach(event => {
                     container.addEventListener(event, (e) => {
                         e.preventDefault();
                         overlay.style.display = 'none';
                     });
                 });
-                // Handle drop
                 container.addEventListener('drop', (e) => {
                     e.preventDefault();
                     overlay.style.display = 'none';
@@ -517,52 +422,9 @@
                     }
                 });
             }
-            
-            render(timestamp, frame) {
-                // Animate models
-                if (this.model && this.rotationSpeed > 0 && this.placed) {
-                    this.model.rotation.y += this.rotationSpeed;
-                    if (this.model === this.models.cube) {
-                        this.model.rotation.x += this.rotationSpeed * 0.7;
-                    } else if (this.model === this.models.torus) {
-                        this.model.rotation.x += this.rotationSpeed * 1.2;
-                    }
-                }
-                // AR hit-test logic
-                if (this.isARActive && frame) {
-                    const session = this.renderer.xr.getSession();
-                    if (!this.hitTestSourceRequested) {
-                        session.requestReferenceSpace('viewer').then((refSpace) => {
-                            session.requestHitTestSource({ space: refSpace }).then((source) => {
-                                this.hitTestSource = source;
-                            });
-                        });
-                        this.hitTestSourceRequested = true;
-                    }
-                    if (this.hitTestSource) {
-                        const referenceSpace = this.renderer.xr.getReferenceSpace();
-                        const hitTestResults = frame.getHitTestResults(this.hitTestSource);
-                        if (hitTestResults.length > 0 && !this.placed) {
-                            const hit = hitTestResults[0];
-                            const pose = hit.getPose(referenceSpace);
-                            this.reticle.visible = true;
-                            this.reticle.matrix.fromArray(pose.transform.matrix);
-                        } else {
-                            this.reticle.visible = false;
-                        }
-                    }
-                }
-                this.renderer.render(this.scene, this.camera);
-            }
-            
-            updateStatus(message) {
-                document.getElementById('status').textContent = message;
-            }
         }
-        
-        // Initialize the AR viewer when the page loads
         window.addEventListener('load', () => {
-            new AR3DViewer();
+            new VR3DViewer();
         });
     </script>
 </body>
