@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR 3D Model Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #dragOverlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 200;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            pointer-events: none;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            max-width: 300px;
+        }
+        
+        .button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 10px 5px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+        
+        .button:hover {
+            background: #0052a3;
+        }
+        
+        .button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+        
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+        }
+        
+        .model-selector {
+            margin: 10px 0;
+        }
+        
+        select {
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background: white;
+            color: black;
+            width: 100%;
+        }
+        
+        .controls {
+            margin-top: 15px;
+        }
+        
+        .control-group {
+            margin: 10px 0;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #ccc;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+        }
+        
+        #arButton {
+            background: #ff6600;
+            font-weight: bold;
+        }
+        
+        #arButton:hover {
+            background: #e55a00;
+        }
+        
+        .warning {
+            background: rgba(255, 165, 0, 0.2);
+            border: 1px solid orange;
+            color: orange;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="dragOverlay" style="display:none;position:absolute;top:0;left:0;width:100vw;height:100vh;z-index:200;background:rgba(0,0,0,0.5);color:white;align-items:center;justify-content:center;font-size:2em;pointer-events:none;">
+            Drop 3D Model (.glb/.gltf) Here
+        </div>
+        <div id="ui">
+            <h3>VR 3D Model Viewer</h3>
+            
+            <div class="warning">
+                <strong>Note:</strong> VR requires HTTPS and a compatible device with WebXR support (e.g., Oculus Browser, Chrome with WebXR, or desktop with WebXR emulator).
+            </div>
+            
+            <div id="status">Loading...</div>
+            
+            <div class="model-selector">
+                <label for="modelSelect">Select Model:</label>
+                <select id="modelSelect">
+                    <option value="cube">Animated Cube</option>
+                    <option value="sphere">Textured Sphere</option>
+                    <option value="torus">Spinning Torus</option>
+                </select>
+            </div>
+            
+            <button id="vrButton" class="button" disabled>Enter VR</button>
+            <button id="resetButton" class="button">Reset View</button>
+            
+            <div class="controls">
+                <div class="control-group">
+                    <label for="scaleSlider">Model Scale:</label>
+                    <input type="range" id="scaleSlider" min="0.1" max="3" step="0.1" value="1">
+                </div>
+                
+                <div class="control-group">
+                    <label for="rotationSpeed">Rotation Speed:</label>
+                    <input type="range" id="rotationSpeed" min="0" max="0.1" step="0.01" value="0.02">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Helper to load external scripts
+        function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+        
+        class AR3DViewer {
+            constructor() {
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.model = null;
+                this.models = {};
+                this.rotationSpeed = 0.02;
+                this.isVRActive = false;
+                
+                this.init();
+                this.setupEventListeners();
+                this.checkVRSupport();
+                this.setupDragAndDrop();
+            }
+            
+            init() {
+                // Create scene
+                this.scene = new THREE.Scene();
+                
+                // Create camera
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.camera.position.set(0, 1.6, 3);
+                
+                // Create renderer
+                this.renderer = new THREE.WebGLRenderer({ 
+                    antialias: true, 
+                    alpha: true,
+                    preserveDrawingBuffer: true
+                });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.xr.enabled = true;
+                this.renderer.shadowMap.enabled = true;
+                this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+                
+                document.getElementById('container').appendChild(this.renderer.domElement);
+                
+                // Add lighting
+                this.setupLighting();
+                
+                // Create models
+                this.createModels();
+                
+                // Set initial model
+                this.setModel('cube');
+                
+                // Start render loop
+                this.renderer.setAnimationLoop(this.render.bind(this));
+                
+                this.updateStatus('Ready! Select a model and try VR.');
+            }
+            
+            setupLighting() {
+                // Ambient light
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+                
+                // Directional light
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(5, 10, 5);
+                directionalLight.castShadow = true;
+                directionalLight.shadow.mapSize.width = 2048;
+                directionalLight.shadow.mapSize.height = 2048;
+                this.scene.add(directionalLight);
+                
+                // Point light for VR
+                const pointLight = new THREE.PointLight(0xffffff, 0.5);
+                pointLight.position.set(0, 2, 0);
+                this.scene.add(pointLight);
+            }
+            
+            createModels() {
+                // Animated Cube
+                const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
+                const cubeMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0x00ff88,
+                    transparent: true,
+                    opacity: 0.9
+                });
+                this.models.cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+                this.models.cube.castShadow = true;
+                this.models.cube.receiveShadow = true;
+                
+                // Textured Sphere
+                const sphereGeometry = new THREE.SphereGeometry(0.8, 32, 32);
+                const canvas = document.createElement('canvas');
+                canvas.width = 256;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                
+                // Create a simple pattern texture
+                const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+                gradient.addColorStop(0, '#ff6b6b');
+                gradient.addColorStop(0.5, '#4ecdc4');
+                gradient.addColorStop(1, '#45b7d1');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, 256, 256);
+                
+                const texture = new THREE.CanvasTexture(canvas);
+                const sphereMaterial = new THREE.MeshPhongMaterial({ map: texture });
+                this.models.sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+                this.models.sphere.castShadow = true;
+                
+                // Spinning Torus
+                const torusGeometry = new THREE.TorusGeometry(0.7, 0.3, 16, 100);
+                const torusMaterial = new THREE.MeshPhongMaterial({ 
+                    color: 0xff6347,
+                    shininess: 100
+                });
+                this.models.torus = new THREE.Mesh(torusGeometry, torusMaterial);
+                this.models.torus.castShadow = true;
+            }
+            
+            setModel(modelName) {
+                if (this.model) {
+                    this.scene.remove(this.model);
+                }
+                
+                this.model = this.models[modelName];
+                if (this.model) {
+                    this.model.position.set(0, 0, -2);
+                    this.scene.add(this.model);
+                }
+            }
+            
+            async checkVRSupport() {
+                if ('xr' in navigator) {
+                    try {
+                        const supported = await navigator.xr.isSessionSupported('immersive-vr');
+                        if (supported) {
+                            document.getElementById('vrButton').disabled = false;
+                            this.updateStatus('VR supported! Ready to start.');
+                        } else {
+                            this.updateStatus('VR not supported on this device.');
+                        }
+                    } catch (error) {
+                        this.updateStatus('Error checking VR support: ' + error.message);
+                    }
+                } else {
+                    this.updateStatus('WebXR not available in this browser.');
+                }
+            }
+            
+            async startVR() {
+                if (!navigator.xr) {
+                    this.updateStatus('WebXR not supported');
+                    return;
+                }
+                
+                try {
+                    const session = await navigator.xr.requestSession('immersive-vr', {
+                        optionalFeatures: ['local-floor', 'bounded-floor']
+                    });
+                    
+                    this.renderer.xr.setSession(session);
+                    this.isVRActive = true;
+                    
+                    document.getElementById('vrButton').textContent = 'Exit VR';
+                    this.updateStatus('VR active!');
+                    
+                    session.addEventListener('end', () => {
+                        this.isVRActive = false;
+                        document.getElementById('vrButton').textContent = 'Enter VR';
+                        this.updateStatus('VR session ended.');
+                    });
+                    
+                } catch (error) {
+                    this.updateStatus('VR Error: ' + error.message);
+                }
+            }
+            
+            exitVR() {
+                if (this.renderer.xr.getSession()) {
+                    this.renderer.xr.getSession().end();
+                }
+            }
+            
+            resetView() {
+                if (this.model) {
+                    this.model.position.set(0, 0, -2);
+                    this.model.rotation.set(0, 0, 0);
+                    this.model.scale.set(1, 1, 1);
+                }
+                this.camera.position.set(0, 1.6, 3);
+                this.camera.lookAt(0, 0, 0);
+                this.updateStatus('View reset.');
+            }
+            
+            setupEventListeners() {
+                // VR button
+                document.getElementById('vrButton').addEventListener('click', () => {
+                    if (this.isVRActive) {
+                        this.exitVR();
+                    } else {
+                        this.startVR();
+                    }
+                });
+                
+                // Reset button
+                document.getElementById('resetButton').addEventListener('click', () => {
+                    this.resetView();
+                });
+                
+                // Model selector
+                document.getElementById('modelSelect').addEventListener('change', (e) => {
+                    this.setModel(e.target.value);
+                });
+                
+                // Scale slider
+                document.getElementById('scaleSlider').addEventListener('input', (e) => {
+                    if (this.model) {
+                        const scale = parseFloat(e.target.value);
+                        this.model.scale.set(scale, scale, scale);
+                    }
+                });
+                
+                // Rotation speed slider
+                document.getElementById('rotationSpeed').addEventListener('input', (e) => {
+                    this.rotationSpeed = parseFloat(e.target.value);
+                });
+                
+                // Window resize
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+                
+                // Touch controls for mobile
+                let isPointerDown = false;
+                let pointerX = 0;
+                let pointerY = 0;
+                
+                this.renderer.domElement.addEventListener('pointerdown', (e) => {
+                    isPointerDown = true;
+                    pointerX = e.clientX;
+                    pointerY = e.clientY;
+                });
+                
+                this.renderer.domElement.addEventListener('pointermove', (e) => {
+                    if (!isPointerDown || this.isVRActive) return;
+                    
+                    const deltaX = (e.clientX - pointerX) * 0.01;
+                    const deltaY = (e.clientY - pointerY) * 0.01;
+                    
+                    if (this.model) {
+                        this.model.rotation.y += deltaX;
+                        this.model.rotation.x += deltaY;
+                    }
+                    
+                    pointerX = e.clientX;
+                    pointerY = e.clientY;
+                });
+                
+                this.renderer.domElement.addEventListener('pointerup', () => {
+                    isPointerDown = false;
+                });
+            }
+            
+            async loadDroppedModel(file) {
+                const ext = file.name.split('.').pop().toLowerCase();
+                if (ext === 'glb' || ext === 'gltf') {
+                    if (!window.THREE.GLTFLoader) {
+                        await loadScript('https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js');
+                    }
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const arrayBuffer = e.target.result;
+                        const loader = new THREE.GLTFLoader();
+                        loader.parse(arrayBuffer, '', (gltf) => {
+                            if (this.model) this.scene.remove(this.model);
+                            this.model = gltf.scene;
+                            this.model.position.set(0, 0, -2);
+                            this.model.scale.set(1, 1, 1);
+                            this.scene.add(this.model);
+                            this.updateStatus('Custom model loaded!');
+                        }, (error) => {
+                            this.updateStatus('Failed to load model: ' + error.message);
+                        });
+                    };
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    this.updateStatus('Unsupported file type. Only .glb/.gltf supported.');
+                }
+            }
+
+            setupDragAndDrop() {
+                const overlay = document.getElementById('dragOverlay');
+                const container = document.getElementById('container');
+                // Highlight overlay on drag
+                ['dragenter', 'dragover'].forEach(event => {
+                    container.addEventListener(event, (e) => {
+                        e.preventDefault();
+                        overlay.style.display = 'flex';
+                    });
+                });
+                // Hide overlay on drag leave
+                ['dragleave', 'drop'].forEach(event => {
+                    container.addEventListener(event, (e) => {
+                        e.preventDefault();
+                        overlay.style.display = 'none';
+                    });
+                });
+                // Handle drop
+                container.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    overlay.style.display = 'none';
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        this.loadDroppedModel(e.dataTransfer.files[0]);
+                    }
+                });
+            }
+            
+            render() {
+                // Animate models
+                if (this.model && this.rotationSpeed > 0) {
+                    this.model.rotation.y += this.rotationSpeed;
+                    
+                    if (this.model === this.models.cube) {
+                        this.model.rotation.x += this.rotationSpeed * 0.7;
+                    } else if (this.model === this.models.torus) {
+                        this.model.rotation.x += this.rotationSpeed * 1.2;
+                    }
+                }
+                
+                this.renderer.render(this.scene, this.camera);
+            }
+            
+            updateStatus(message) {
+                document.getElementById('status').textContent = message;
+            }
+        }
+        
+        // Initialize the VR viewer when the page loads
+        window.addEventListener('load', () => {
+            new AR3DViewer();
+        });
+    </script>
+</body>
+</html>
